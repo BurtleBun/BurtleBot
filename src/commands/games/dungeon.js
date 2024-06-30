@@ -91,7 +91,7 @@ class Battle {
       await this.updateBattleEmbed(battleResult);
     } else {
       await this.processTurn();
-      setTimeout(() => this.processNextTurn(), 1000); // seconds delay between turns
+      setTimeout(() => this.processNextTurn(), 2000); // seconds delay between turns
     }
   }
 
@@ -107,7 +107,10 @@ class Battle {
 
   async processTurn(interaction) {
     const { character, time } = this.actionQueue.shift();
-    this.turn++; // Keep this for internal tracking if needed
+    this.turn++;
+
+    // Update speed bars for all characters
+    this.characters.forEach((char) => char.updateSpeedBar());
 
     if (character === this.enemy) {
       const target = this.players.filter((p) => p.isAlive())[
@@ -209,7 +212,7 @@ class Battle {
       const filledLength = Math.round((length * speedBar) / 100);
       const emptyLength = length - filledLength;
       const bar = "█".repeat(filledLength) + "░".repeat(emptyLength);
-      return `${bar} ${speedBar}/100`;
+      return `${bar} ${speedBar.toFixed(0)}/100`;
     };
 
     const data = [
@@ -360,9 +363,9 @@ module.exports = {
 
           // Start the battle
           const players = party.members.map(
-            (id) => new Character(`${interaction.user.username}`, 50, 1, 10, 10)
+            (id) => new Character(`${id}`, 50, 1, 10, 7)
           );
-          const enemy = new Character("Dungeon Boss", 100, 1, 10, 10);
+          const enemy = new Character("Dungeon Boss", 100, 1, 10, 15);
 
           const battle = new Battle(players, enemy, battleMessage);
           await battle.start();
