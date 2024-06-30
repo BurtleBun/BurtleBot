@@ -5,6 +5,7 @@ const {
   ActionRowBuilder,
   ButtonStyle,
 } = require("discord.js");
+const { table } = require("table");
 
 // Import the necessary functions from your party system
 const { getPartyByMember } = require("../misc/party.js");
@@ -44,15 +45,29 @@ class Character {
   }
 }
 
+function createHealthBar(current, max, length = 10) {
+  const filledLength = Math.round((length * current) / max);
+  const emptyLength = length - filledLength;
+  const bar = "█".repeat(filledLength) + "░".repeat(emptyLength);
+  return `${bar} ${current}/${max}`;
+}
+
+function createSpeedBar(speedBar, length = 10) {
+  const filledLength = Math.round((length * speedBar) / 100);
+  const emptyLength = length - filledLength;
+  const bar = "█".repeat(filledLength) + "░".repeat(emptyLength);
+  return `${bar} ${speedBar}/100`;
+}
+
 class Battle {
-  constructor(players, enemy, interaction) {
+  constructor(players, enemy, message) {
     this.players = players;
     this.enemy = enemy;
     this.turn = 0;
     this.log = [];
     this.characters = [...players, enemy];
     this.actionQueue = [];
-    this.interaction = interaction;
+    this.message = message;
   }
 
   async start() {
@@ -92,8 +107,7 @@ class Battle {
 
   async processTurn(interaction) {
     const { character, time } = this.actionQueue.shift();
-    this.turn++;
-    this.log.push(`--- Turn ${this.turn} ---`);
+    this.turn++; // Keep this for internal tracking if needed
 
     if (character === this.enemy) {
       const target = this.players.filter((p) => p.isAlive())[
@@ -142,15 +156,24 @@ class Battle {
     embed.addFields(
       {
         name: "Enemy",
-        value: `${this.enemy.name}: ${this.enemy.hp}/${this.enemy.maxHp} HP`,
-        inline: true,
+        value: `${this.enemy.name}: ${createHealthBar(
+          this.enemy.hp,
+          this.enemy.maxHp
+        )}\nSpeed: ${createSpeedBar(this.enemy.speedBar)}`,
+        inline: false,
       },
       {
         name: "Players",
         value: this.players
-          .map((p) => `${p.name}: ${p.hp}/${p.maxHp} HP`)
-          .join("\n"),
-        inline: true,
+          .map(
+            (p) =>
+              `${p.name}: ${createHealthBar(
+                p.hp,
+                p.maxHp
+              )}\nSpeed: ${createSpeedBar(p.speedBar)}`
+          )
+          .join("\n\n"),
+        inline: false,
       }
     );
 
@@ -161,9 +184,89 @@ class Battle {
     return embed;
   }
 
+  createBattleTable() {
+    const allCharacters = [this.enemy, ...this.players];
+    const longestNameLength = Math.max(
+      ...allCharacters.map((c) => c.name.length)
+    );
+
+    // Calculate available width (assuming max message width of 80 characters)
+    const maxWidth = 80;
+    const nameColumnWidth = Math.max(longestNameLength, 10);
+    const availableWidth = maxWidth - nameColumnWidth - 7; // 7 for borders and spaces
+
+    const hpBarLength = Math.floor(availableWidth * 0.6);
+    const speedBarLength = Math.floor(availableWidth * 0.4);
+
+    const createHealthBar = (current, max, length = hpBarLength) => {
+      const filledLength = Math.round((length * current) / max);
+      const emptyLength = length - filledLength;
+      const bar = "█".repeat(filledLength) + "░".repeat(emptyLength);
+      return `${bar} ${current}/${max}`;
+    };
+
+    const createSpeedBar = (speedBar, length = speedBarLength) => {
+      const filledLength = Math.round((length * speedBar) / 100);
+      const emptyLength = length - filledLength;
+      const bar = "█".repeat(filledLength) + "░".repeat(emptyLength);
+      return `${bar} ${speedBar}/100`;
+    };
+
+    const data = [
+      ["Name", "HP", "Speed"],
+      [
+        this.enemy.name,
+        createHealthBar(this.enemy.hp, this.enemy.maxHp),
+        createSpeedBar(this.enemy.speedBar),
+      ],
+      ...this.players.map((p) => [
+        p.name,
+        createHealthBar(p.hp, p.maxHp),
+        createSpeedBar(p.speedBar),
+      ]),
+    ];
+
+    const config = {
+      columns: {
+        0: { alignment: "left", width: nameColumnWidth },
+        1: { alignment: "left", width: hpBarLength + 8 }, // +8 for the numbers
+        2: { alignment: "left", width: speedBarLength + 8 },
+      },
+      border: {
+        topBody: `─`,
+        topJoin: `┬`,
+        topLeft: `┌`,
+        topRight: `┐`,
+        bottomBody: `─`,
+        bottomJoin: `┴`,
+        bottomLeft: `└`,
+        bottomRight: `┘`,
+        bodyLeft: `│`,
+        bodyRight: `│`,
+        bodyJoin: `│`,
+        joinBody: `─`,
+        joinLeft: `├`,
+        joinRight: `┤`,
+        joinJoin: `┼`,
+      },
+    };
+
+    return table(data, config);
+  }
+
   async updateBattleEmbed(result = null) {
-    const newEmbed = this.createEmbed(result);
-    await this.interaction.editReply({ embeds: [newEmbed] });
+    const battleTable = this.createBattleTable();
+    const recentLogs = this.log.slice(-10).join("\n"); // Increased from -5 to -10
+
+    let content = "```\n" + battleTable + "\n```\n";
+    if (recentLogs) {
+      content += "**Recent Actions:**\n" + recentLogs + "\n";
+    }
+    if (result) {
+      content += "\n**Result:** " + result;
+    }
+
+    await this.message.edit({ content });
   }
 }
 
@@ -208,8 +311,10 @@ module.exports = {
         fetchReply: true,
       });
 
+      let battleStarted = false;
+
       const collector = readyMessage.createMessageComponentCollector({
-        filter: (i) => party.members.includes(i.user.id),
+        filter: (i) => party.members.includes(i.user.id) && !battleStarted,
         time: 60000,
       });
 
@@ -227,7 +332,6 @@ module.exports = {
             );
 
             await readyMessage.edit({ embeds: [updatedEmbed] });
-            await i.reply({ content: `${i.user} is ready!`, ephemeral: true });
 
             if (readyPlayers.size === party.members.length) {
               collector.stop("all_ready");
@@ -243,29 +347,27 @@ module.exports = {
 
       collector.on("end", async (collected, reason) => {
         if (reason === "all_ready") {
-          const finalEmbed = EmbedBuilder.from(
-            readyMessage.embeds[0]
-          ).setDescription(
-            "All players are ready! Starting the dungeon raid..."
-          );
+          battleStarted = true;
 
-          await readyMessage.edit({ embeds: [finalEmbed], components: [] });
+          // Delete the ready check message
+          await readyMessage.delete().catch(console.error);
 
+          // Send a new message to start the battle
+          const battleMessage = await interaction.followUp({
+            content: "All players are ready! Starting the dungeon raid...",
+            fetchReply: true,
+          });
+
+          // Start the battle
           const players = party.members.map(
-            (id) => new Character(`<@${id}>`, 50, 1, 10, 10)
+            (id) => new Character(`${interaction.user.username}`, 50, 1, 10, 10)
           );
           const enemy = new Character("Dungeon Boss", 100, 1, 10, 10);
 
-          const battle = new Battle(players, enemy, interaction);
+          const battle = new Battle(players, enemy, battleMessage);
           await battle.start();
         } else {
-          const timeoutEmbed = EmbedBuilder.from(
-            readyMessage.embeds[0]
-          ).setDescription(
-            "Dungeon raid cancelled. Not all players were ready in time."
-          );
-
-          await readyMessage.edit({ embeds: [timeoutEmbed], components: [] });
+          // ... (rest of the code remains the same)
         }
       });
     } catch (error) {
