@@ -9,7 +9,8 @@ const { table } = require("table");
 const { getPartyByMember } = require("../misc/party.js");
 
 class Character {
-  constructor(name, hp, minAtk, maxAtk, speed) {
+  constructor(id, name, hp, minAtk, maxAtk, speed) {
+    this.id = id;
     this.name = name;
     this.hp = hp;
     this.maxHp = hp;
@@ -125,13 +126,13 @@ class Battle {
       const damage = character.attack();
       target.takeDamage(damage);
       this.log.push(
-        `${character.name} attacks ${target.name} for ${damage} damage!`
+        `${character.name} attacks <@${target.id}> for **${damage}** damage!`
       );
     } else {
       const damage = character.attack();
       this.enemy.takeDamage(damage);
       this.log.push(
-        `${character.name} attacks ${this.enemy.name} for ${damage} damage!`
+        `<@${character.id}> attacks ${this.enemy.name} for **${damage}** damage!`
       );
     }
 
@@ -139,9 +140,9 @@ class Battle {
   }
 
   createBattleTable() {
-    const allCharacters = [this.enemy, ...this.players];
     const longestNameLength = Math.max(
-      ...allCharacters.map((c) => c.name.length)
+      this.enemy.name.length,
+      ...this.players.map((c) => c.name.length)
     );
 
     const maxWidth = 80;
@@ -172,6 +173,7 @@ class Battle {
         createHealthBar(this.enemy.hp, this.enemy.maxHp),
         this.enemy.isAlive() ? createSpeedBar(this.enemy.speedBar) : "DEFEATED",
       ],
+      ["", "", ""], // Empty row for separation
       ...this.players.map((p) => [
         p.name,
         createHealthBar(p.hp, p.maxHp),
@@ -201,6 +203,9 @@ class Battle {
         joinLeft: `├`,
         joinRight: `┤`,
         joinJoin: `┼`,
+      },
+      drawHorizontalLine: (index, size) => {
+        return index === 0 || index === 1 || index === 2 || index === size;
       },
     };
 
@@ -312,15 +317,44 @@ module.exports = {
           });
 
           // Start the battle
-          const players = party.members.map(
-            (id) => new Character(`${id}`, 50, 1, 10, 7)
+          const players = await Promise.all(
+            party.members.map(async (id) => {
+              const member = await interaction.guild.members.fetch(id);
+              return new Character(id, member.user.username, 50, 1, 10, 7);
+            })
           );
-          const enemy = new Character("Dungeon Boss", 100, 1, 10, 15);
+          const enemy = new Character("enemy", "Dungeon Boss", 100, 1, 10, 15);
 
           const battle = new Battle(players, enemy, battleMessage);
           await battle.start();
         } else {
-          // ... (rest of the code remains the same)
+          // Handle case where not all players are ready or the ready check timed out
+          const notReadyCount = party.members.length - readyPlayers.size;
+          let timeoutMessage = "";
+
+          if (reason === "time") {
+            timeoutMessage = "The ready check has timed out. ";
+          }
+
+          const failedEmbed = new EmbedBuilder()
+            .setColor("Red")
+            .setTitle("Dungeon Raid Cancelled")
+            .setDescription(
+              `${timeoutMessage}${notReadyCount} player(s) did not ready up in time. The dungeon raid has been cancelled.`
+            );
+
+          // Edit the original message to show the raid was cancelled
+          await readyMessage.edit({
+            embeds: [failedEmbed],
+            components: [], // Remove the ready button
+          });
+
+          // Send a follow-up message to notify about the cancellation
+          await interaction.followUp({
+            content:
+              "The dungeon raid has been cancelled due to not all players being ready.",
+            ephemeral: true,
+          });
         }
       });
     } catch (error) {
