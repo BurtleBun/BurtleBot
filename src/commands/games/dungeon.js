@@ -101,7 +101,7 @@ class Battle {
 
     if (actionTaker) {
       await this.processTurn(actionTaker);
-      await new Promise((resolve) => setTimeout(resolve, 2000)); // 2-second delay between turns
+      await new Promise((resolve) => setTimeout(resolve, 1000)); // 2-second delay between turns
       this.processNextTurn();
     }
   }
@@ -174,12 +174,21 @@ class Battle {
         this.enemy.isAlive() ? createSpeedBar(this.enemy.speedBar) : "DEFEATED",
       ],
       ["", "", ""], // Empty row for separation
-      ...this.players.map((p) => [
+    ];
+
+    // Add players with a small gap between them
+    this.players.forEach((p, index) => {
+      data.push([
         p.name,
         createHealthBar(p.hp, p.maxHp),
         p.isAlive() ? createSpeedBar(p.speedBar) : "DEFEATED",
-      ]),
-    ];
+      ]);
+
+      // Add a small gap (empty row) between players, but not after the last player
+      if (index < this.players.length - 1) {
+        data.push(["", "", ""]);
+      }
+    });
 
     const config = {
       columns: {
