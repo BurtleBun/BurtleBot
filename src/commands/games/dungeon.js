@@ -101,7 +101,7 @@ class Battle {
 
     if (actionTaker) {
       await this.processTurn(actionTaker);
-      await new Promise((resolve) => setTimeout(resolve, 1000)); // 2-second delay between turns
+      await new Promise((resolve) => setTimeout(resolve, 1000)); // delay between turns
       this.processNextTurn();
     }
   }

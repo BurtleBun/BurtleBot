@@ -266,15 +266,17 @@ async function startGame(interaction, targetUser, gameMessage) {
   }
 
   // Game over
-  const winner = player1.hp > 0 ? player1.user : player2.user;
+  const winner = player1.hp > 0 ? player1 : player2;
+  const loser = winner === player1 ? player2 : player1;
+  
   embed
     .setDescription(
       `**Game Over!**\n\n` +
         `Final Scores:\n` +
         `${player1.user}: ${player1.hp} HP\n` +
         `${player2.user}: ${player2.hp} HP\n\n` +
-        `**${winner} wins the game!**`
+        `**${winner.user} wins the game!**`
     )
-    .setThumbnail(currentPlayer.user.displayAvatarURL({ dynamic: true }));
+    .setThumbnail(winner.user.displayAvatarURL({ dynamic: true }));
   await gameMessage.edit({ embeds: [embed], components: [] });
 }
