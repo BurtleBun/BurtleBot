@@ -6,8 +6,6 @@ const {
   ButtonStyle,
 } = require("discord.js");
 const { table } = require("table");
-
-// Import the necessary functions from your party system
 const { getPartyByMember } = require("../misc/party.js");
 
 class Character {
@@ -56,7 +54,7 @@ function createSpeedBar(speedBar, length = 10) {
   const filledLength = Math.round((length * speedBar) / 100);
   const emptyLength = length - filledLength;
   const bar = "█".repeat(filledLength) + "░".repeat(emptyLength);
-  return `${bar} ${speedBar}/100`;
+  return `${bar} ${speedBar.toFixed(0)}/100`;
 }
 
 class Battle {
@@ -66,32 +64,44 @@ class Battle {
     this.turn = 0;
     this.log = [];
     this.characters = [...players, enemy];
-    this.actionQueue = [];
     this.message = message;
+    this.isRunning = false;
   }
 
   async start() {
-    this.initializeActionQueue();
     this.log.push("The battle is about to begin!");
+    this.isRunning = true;
     await this.updateBattleEmbed();
     await this.processNextTurn();
   }
 
-  initializeActionQueue() {
-    this.actionQueue = this.characters.map((char) => ({
-      character: char,
-      time: 100 / char.speed,
-    }));
-    this.actionQueue.sort((a, b) => a.time - b.time);
-  }
-
   async processNextTurn() {
+    if (!this.isRunning) return;
+
     const battleResult = this.checkBattleEnd();
     if (battleResult) {
       await this.updateBattleEmbed(battleResult);
-    } else {
-      await this.processTurn();
-      setTimeout(() => this.processNextTurn(), 2000); // seconds delay between turns
+      this.isRunning = false;
+      return;
+    }
+
+    let actionTaker = null;
+    while (!actionTaker && this.isRunning) {
+      for (const character of this.characters.filter((c) => c.isAlive())) {
+        if (character.updateSpeedBar()) {
+          actionTaker = character;
+          break;
+        }
+      }
+      if (!actionTaker) {
+        await new Promise((resolve) => setTimeout(resolve, 100)); // Small delay to prevent CPU hogging
+      }
+    }
+
+    if (actionTaker) {
+      await this.processTurn(actionTaker);
+      await new Promise((resolve) => setTimeout(resolve, 2000)); // 2-second delay between turns
+      this.processNextTurn();
     }
   }
 
@@ -102,22 +112,16 @@ class Battle {
     if (!this.enemy.isAlive()) {
       return "All players have defeated the enemy! Players win!";
     }
-    return null; // Battle continues
+    return null;
   }
 
-  async processTurn(interaction) {
-    const { character, time } = this.actionQueue.shift();
+  async processTurn(character) {
     this.turn++;
 
-    // Update speed bars for all characters
-    this.characters.forEach((char) => char.updateSpeedBar());
-
     if (character === this.enemy) {
-      const target = this.players.filter((p) => p.isAlive())[
-        Math.floor(
-          Math.random() * this.players.filter((p) => p.isAlive()).length
-        )
-      ];
+      const alivePlayers = this.players.filter((p) => p.isAlive());
+      const target =
+        alivePlayers[Math.floor(Math.random() * alivePlayers.length)];
       const damage = character.attack();
       target.takeDamage(damage);
       this.log.push(
@@ -131,60 +135,7 @@ class Battle {
       );
     }
 
-    // Re-insert the character into the action queue
-    const newTime = time + 100 / character.speed;
-    const insertIndex = this.actionQueue.findIndex(
-      (action) => action.time > newTime
-    );
-    if (insertIndex === -1) {
-      this.actionQueue.push({ character, time: newTime });
-    } else {
-      this.actionQueue.splice(insertIndex, 0, { character, time: newTime });
-    }
-
-    await this.updateBattleEmbed(interaction);
-  }
-
-  createEmbed(result = null) {
-    const embed = new EmbedBuilder().setColor("Blue").setTitle("Raid Battle");
-
-    // Only set description if there are log entries
-    const recentLogs = this.log.slice(-5).join("\n");
-    if (recentLogs) {
-      embed.setDescription(recentLogs);
-    } else {
-      embed.setDescription("The battle is about to begin!");
-    }
-
-    embed.addFields(
-      {
-        name: "Enemy",
-        value: `${this.enemy.name}: ${createHealthBar(
-          this.enemy.hp,
-          this.enemy.maxHp
-        )}\nSpeed: ${createSpeedBar(this.enemy.speedBar)}`,
-        inline: false,
-      },
-      {
-        name: "Players",
-        value: this.players
-          .map(
-            (p) =>
-              `${p.name}: ${createHealthBar(
-                p.hp,
-                p.maxHp
-              )}\nSpeed: ${createSpeedBar(p.speedBar)}`
-          )
-          .join("\n\n"),
-        inline: false,
-      }
-    );
-
-    if (result) {
-      embed.addFields({ name: "Result", value: result });
-    }
-
-    return embed;
+    await this.updateBattleEmbed();
   }
 
   createBattleTable() {
@@ -193,10 +144,9 @@ class Battle {
       ...allCharacters.map((c) => c.name.length)
     );
 
-    // Calculate available width (assuming max message width of 80 characters)
     const maxWidth = 80;
     const nameColumnWidth = Math.max(longestNameLength, 10);
-    const availableWidth = maxWidth - nameColumnWidth - 7; // 7 for borders and spaces
+    const availableWidth = maxWidth - nameColumnWidth - 7;
 
     const hpBarLength = Math.floor(availableWidth * 0.6);
     const speedBarLength = Math.floor(availableWidth * 0.4);
@@ -220,19 +170,19 @@ class Battle {
       [
         this.enemy.name,
         createHealthBar(this.enemy.hp, this.enemy.maxHp),
-        createSpeedBar(this.enemy.speedBar),
+        this.enemy.isAlive() ? createSpeedBar(this.enemy.speedBar) : "DEFEATED",
       ],
       ...this.players.map((p) => [
         p.name,
         createHealthBar(p.hp, p.maxHp),
-        createSpeedBar(p.speedBar),
+        p.isAlive() ? createSpeedBar(p.speedBar) : "DEFEATED",
       ]),
     ];
 
     const config = {
       columns: {
         0: { alignment: "left", width: nameColumnWidth },
-        1: { alignment: "left", width: hpBarLength + 8 }, // +8 for the numbers
+        1: { alignment: "left", width: hpBarLength + 8 },
         2: { alignment: "left", width: speedBarLength + 8 },
       },
       border: {
@@ -259,7 +209,7 @@ class Battle {
 
   async updateBattleEmbed(result = null) {
     const battleTable = this.createBattleTable();
-    const recentLogs = this.log.slice(-10).join("\n"); // Increased from -5 to -10
+    const recentLogs = this.log.slice(-10).join("\n");
 
     let content = "```\n" + battleTable + "\n```\n";
     if (recentLogs) {
