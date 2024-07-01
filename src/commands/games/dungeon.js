@@ -59,12 +59,12 @@ function createSpeedBar(speedBar, length = 10) {
 }
 
 class Battle {
-  constructor(players, enemy, message) {
+  constructor(players, enemies, message) {
     this.players = players;
-    this.enemy = enemy;
+    this.enemies = enemies;
     this.turn = 0;
     this.log = [];
-    this.characters = [...players, enemy];
+    this.characters = [...players, ...enemies];
     this.message = message;
     this.isRunning = false;
   }
@@ -95,23 +95,23 @@ class Battle {
         }
       }
       if (!actionTaker) {
-        await new Promise((resolve) => setTimeout(resolve, 100)); // Small delay to prevent CPU hogging
+        await new Promise((resolve) => setTimeout(resolve, 100));
       }
     }
 
     if (actionTaker) {
       await this.processTurn(actionTaker);
-      await new Promise((resolve) => setTimeout(resolve, 1000)); // delay between turns
+      await new Promise((resolve) => setTimeout(resolve, 1000));
       this.processNextTurn();
     }
   }
 
   checkBattleEnd() {
     if (!this.players.some((p) => p.isAlive())) {
-      return "The enemy has defeated all players! Enemy wins!";
+      return "The enemies have defeated all players! Enemies win!";
     }
-    if (!this.enemy.isAlive()) {
-      return "All players have defeated the enemy! Players win!";
+    if (!this.enemies.some((e) => e.isAlive())) {
+      return "All players have defeated the enemies! Players win!";
     }
     return null;
   }
@@ -119,7 +119,7 @@ class Battle {
   async processTurn(character) {
     this.turn++;
 
-    if (character === this.enemy) {
+    if (this.enemies.includes(character)) {
       const alivePlayers = this.players.filter((p) => p.isAlive());
       const target =
         alivePlayers[Math.floor(Math.random() * alivePlayers.length)];
@@ -129,10 +129,13 @@ class Battle {
         `${character.name} attacks <@${target.id}> for **${damage}** damage!`
       );
     } else {
+      const aliveEnemies = this.enemies.filter((e) => e.isAlive());
+      const target =
+        aliveEnemies[Math.floor(Math.random() * aliveEnemies.length)];
       const damage = character.attack();
-      this.enemy.takeDamage(damage);
+      target.takeDamage(damage);
       this.log.push(
-        `<@${character.id}> attacks ${this.enemy.name} for **${damage}** damage!`
+        `<@${character.id}> attacks ${target.name} for **${damage}** damage!`
       );
     }
 
@@ -141,16 +144,16 @@ class Battle {
 
   createBattleTable() {
     const longestNameLength = Math.max(
-      this.enemy.name.length,
-      ...this.players.map((c) => c.name.length)
+      ...this.enemies.map((e) => e.name.length),
+      ...this.players.map((p) => p.name.length)
     );
 
-    const maxWidth = 80;
+    const maxWidth = 50;
     const nameColumnWidth = Math.max(longestNameLength, 10);
     const availableWidth = maxWidth - nameColumnWidth - 7;
 
-    const hpBarLength = Math.floor(availableWidth * 0.6);
-    const speedBarLength = Math.floor(availableWidth * 0.4);
+    const hpBarLength = Math.floor(availableWidth * 0.5);
+    const speedColumnWidth = 10;
 
     const createHealthBar = (current, max, length = hpBarLength) => {
       const filledLength = Math.round((length * current) / max);
@@ -159,42 +162,29 @@ class Battle {
       return `${bar} ${current}/${max}`;
     };
 
-    const createSpeedBar = (speedBar, length = speedBarLength) => {
-      const filledLength = Math.round((length * speedBar) / 100);
-      const emptyLength = length - filledLength;
-      const bar = "█".repeat(filledLength) + "░".repeat(emptyLength);
-      return `${bar} ${speedBar.toFixed(0)}/100`;
-    };
+    const createCharacterRow = (character) => [
+      character.name.substring(0, nameColumnWidth),
+      createHealthBar(character.hp, character.maxHp),
+      character.isAlive() ? `${character.speedBar.toFixed(0)}/100` : "DEFEATED",
+    ];
+
+    const createSeparatorRow = () => ["", "", ""];
 
     const data = [
       ["Name", "HP", "Speed"],
-      [
-        this.enemy.name,
-        createHealthBar(this.enemy.hp, this.enemy.maxHp),
-        this.enemy.isAlive() ? createSpeedBar(this.enemy.speedBar) : "DEFEATED",
-      ],
-      ["", "", ""], // Empty row for separation
+      ...this.enemies
+        .flatMap((enemy) => [createCharacterRow(enemy), createSeparatorRow()])
+        .slice(0, -1),
+      ...this.players
+        .flatMap((player) => [createCharacterRow(player), createSeparatorRow()])
+        .slice(0, -1),
     ];
-
-    // Add players with a small gap between them
-    this.players.forEach((p, index) => {
-      data.push([
-        p.name,
-        createHealthBar(p.hp, p.maxHp),
-        p.isAlive() ? createSpeedBar(p.speedBar) : "DEFEATED",
-      ]);
-
-      // Add a small gap (empty row) between players, but not after the last player
-      if (index < this.players.length - 1) {
-        data.push(["", "", ""]);
-      }
-    });
 
     const config = {
       columns: {
         0: { alignment: "left", width: nameColumnWidth },
         1: { alignment: "left", width: hpBarLength + 8 },
-        2: { alignment: "left", width: speedBarLength + 8 },
+        2: { alignment: "right", width: speedColumnWidth },
       },
       border: {
         topBody: `─`,
@@ -214,7 +204,12 @@ class Battle {
         joinJoin: `┼`,
       },
       drawHorizontalLine: (index, size) => {
-        return index === 0 || index === 1 || index === 2 || index === size;
+        return (
+          index === 0 ||
+          index === 1 ||
+          index === this.enemies.length * 2 ||
+          index === size
+        );
       },
     };
 
@@ -316,28 +311,29 @@ module.exports = {
         if (reason === "all_ready") {
           battleStarted = true;
 
-          // Delete the ready check message
           await readyMessage.delete().catch(console.error);
 
-          // Send a new message to start the battle
           const battleMessage = await interaction.followUp({
             content: "All players are ready! Starting the dungeon raid...",
             fetchReply: true,
           });
 
-          // Start the battle
           const players = await Promise.all(
             party.members.map(async (id) => {
               const member = await interaction.guild.members.fetch(id);
-              return new Character(id, member.user.username, 50, 1, 10, 7);
+              return new Character(id, member.user.username, 15, 1, 5, 5);
             })
           );
-          const enemy = new Character("enemy", "Dungeon Boss", 100, 1, 10, 15);
 
-          const battle = new Battle(players, enemy, battleMessage);
+          const enemies = [
+            new Character("enemy1", "Slime 1", 5, 1, 1, 3),
+            new Character("enemy2", "Slime 2", 5, 1, 1, 3),
+            new Character("enemy3", "Slime 3", 5, 1, 1, 3),
+          ];
+
+          const battle = new Battle(players, enemies, battleMessage);
           await battle.start();
         } else {
-          // Handle case where not all players are ready or the ready check timed out
           const notReadyCount = party.members.length - readyPlayers.size;
           let timeoutMessage = "";
 
@@ -352,13 +348,11 @@ module.exports = {
               `${timeoutMessage}${notReadyCount} player(s) did not ready up in time. The dungeon raid has been cancelled.`
             );
 
-          // Edit the original message to show the raid was cancelled
           await readyMessage.edit({
             embeds: [failedEmbed],
-            components: [], // Remove the ready button
+            components: [],
           });
 
-          // Send a follow-up message to notify about the cancellation
           await interaction.followUp({
             content:
               "The dungeon raid has been cancelled due to not all players being ready.",

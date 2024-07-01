@@ -9,21 +9,27 @@ const playerStatsSchema = new Schema({
     type: String,
     required: true,
   },
-  xp: {
-    type: Number,
-    default: 0,
-  },
-  level: {
-    type: Number,
-    default: 0,
-  },
-  mythos: {
+  username: {
     type: String,
-    default: "None",
+    required: true,
   },
-  currency: {
+  attack: {
+    min: {
+      type: Number,
+      default: 1
+    },
+    max: {
+      type: Number,
+      default:5
+    },
+  },
+  speed: {
     type: Number,
-    default: 0,
+    default: 5,
+  },
+  health: {
+    type: Number,
+    default: 15,
   },
   wins: {
     type: Number,
