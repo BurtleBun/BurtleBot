@@ -7,6 +7,7 @@ const {
 } = require("discord.js");
 const { table } = require("table");
 const { getPartyByMember } = require("../misc/party.js");
+const PlayerStats = require("../../models/PlayerStatsSchema.js");
 
 class Character {
   constructor(id, name, hp, minAtk, maxAtk, speed) {
@@ -73,17 +74,18 @@ class Battle {
     this.log.push("The battle is about to begin!");
     this.isRunning = true;
     await this.updateBattleEmbed();
-    await this.processNextTurn();
+    const result = await this.processNextTurn();
+    return result || "Battle ended without a clear result";
   }
 
   async processNextTurn() {
-    if (!this.isRunning) return;
+    if (!this.isRunning) return this.checkBattleEnd();
 
     const battleResult = this.checkBattleEnd();
     if (battleResult) {
       await this.updateBattleEmbed(battleResult);
       this.isRunning = false;
-      return;
+      return battleResult;
     }
 
     let actionTaker = null;
@@ -102,8 +104,9 @@ class Battle {
     if (actionTaker) {
       await this.processTurn(actionTaker);
       await new Promise((resolve) => setTimeout(resolve, 1000));
-      this.processNextTurn();
+      return this.processNextTurn();
     }
+    return "Battle ended Unexpectedly";
   }
 
   checkBattleEnd() {
@@ -236,10 +239,25 @@ module.exports = {
   name: "dungeon",
   description: "Start a dungeon raid with your party",
   dm_permission: false,
+  options: [
+    {
+      name: "floor",
+      description: "Choose the dungeon floor",
+      type: ApplicationCommandOptionType.Integer,
+      required: true,
+      choices: [
+        { name: "Floor 0", value: 0 },
+        { name: "Floor 1", value: 1 },
+        { name: "Floor 2", value: 2 },
+        { name: "Floor 3", value: 3 },
+      ],
+    },
+  ],
 
   callback: async (client, interaction) => {
     try {
       const party = getPartyByMember(interaction.user.id);
+      const floor = interaction.options.getInteger("floor");
 
       if (!party) {
         return await interaction.reply(
@@ -253,11 +271,38 @@ module.exports = {
         );
       }
 
+      // Check if all party members have cleared the previous floor
+      const partyStats = await PlayerStats.find({
+        userId: { $in: party.members },
+        guildId: interaction.guildId,
+      });
+
+      const eligibleMembers = partyStats.filter(
+        (stats) => stats.highestClearedFloor >= floor - 1
+      );
+
+      if (eligibleMembers.length < party.members.length) {
+        const ineligibleMembers = party.members.filter(
+          (memberId) =>
+            !eligibleMembers.some((stats) => stats.userId === memberId)
+        );
+
+        const ineligibleMentions = ineligibleMembers
+          .map((memberId) => `<@${memberId}>`)
+          .join(", ");
+
+        return await interaction.reply(
+          `The following party members have not cleared Floor ${
+            floor - 1
+          } yet: ${ineligibleMentions}. They need to clear it before attempting Floor ${floor}.`
+        );
+      }
+
       const readyEmbed = new EmbedBuilder()
         .setColor("Blue")
-        .setTitle("Dungeon Raid Ready Check")
+        .setTitle(`Dungeon Raid Ready Check - Floor ${floor}`)
         .setDescription(
-          "All party members must ready up to start the dungeon raid."
+          `All party members must ready up to start the dungeon raid on Floor ${floor}.`
         );
 
       const readyButton = new ButtonBuilder()
@@ -314,56 +359,94 @@ module.exports = {
           await readyMessage.delete().catch(console.error);
 
           const battleMessage = await interaction.followUp({
-            content: "All players are ready! Starting the dungeon raid...",
+            content: `All players are ready! Starting the dungeon raid on Floor ${floor}...`,
             fetchReply: true,
           });
 
           const players = await Promise.all(
             party.members.map(async (id) => {
               const member = await interaction.guild.members.fetch(id);
-              return new Character(id, member.user.username, 15, 1, 5, 5);
+              const stats = partyStats.find((stats) => stats.userId === id);
+              return new Character(
+                id,
+                member.user.username,
+                stats.health,
+                stats.attack.min,
+                stats.attack.max,
+                stats.speed
+              );
             })
           );
 
-          const enemies = [
-            new Character("enemy1", "Slime 1", 5, 1, 1, 3),
-            new Character("enemy2", "Slime 2", 5, 1, 1, 3),
-            new Character("enemy3", "Slime 3", 5, 1, 1, 3),
-          ];
-
-          const battle = new Battle(players, enemies, battleMessage);
-          await battle.start();
-        } else {
-          const notReadyCount = party.members.length - readyPlayers.size;
-          let timeoutMessage = "";
-
-          if (reason === "time") {
-            timeoutMessage = "The ready check has timed out. ";
+          let enemies;
+          if (floor === 0) {
+            enemies = [
+              new Character("enemy1", "Slime 1", 5, 1, 1, Math.random()*10+1),
+              new Character("enemy2", "Slime 2", 5, 1, 1, Math.random()*10+1),
+              new Character("enemy3", "Slime 3", 5, 1, 1, Math.random()*10+1),
+            ];
+          } else if (floor === 1) {
+            enemies = [
+              new Character("enemy1", "Slime 1", 5, 1, 1, 3),
+              new Character("enemy2", "Slime 2", 5, 1, 1, 3),
+              new Character("enemy3", "Slime 3", 5, 1, 1, 3),
+              new Character("enemy4", "Slime 4", 5, 1, 1, 3),
+              new Character("enemy5", "Slime 5", 5, 1, 1, 3),
+              new Character("enemy6", "Slime 6", 5, 1, 1, 3),
+            ];
+          } else {
+            return await interaction.followUp("Invalid floor selected.");
           }
 
-          const failedEmbed = new EmbedBuilder()
-            .setColor("Red")
-            .setTitle("Dungeon Raid Cancelled")
-            .setDescription(
-              `${timeoutMessage}${notReadyCount} player(s) did not ready up in time. The dungeon raid has been cancelled.`
+          const battle = new Battle(players, enemies, battleMessage);
+          const result = await battle.start();
+
+          if (result) {
+            if (result.includes("Players win")) {
+              // Update player stats and handle rewards
+              for (const player of players) {
+                const stats = await PlayerStats.findOne({
+                  userId: player.id,
+                  guildId: interaction.guildId,
+                });
+
+                if (stats) {
+                  if (floor > stats.highestClearedFloor) {
+                    stats.highestClearedFloor = floor;
+                  }
+                  // Add more stat updates or rewards here
+
+                  await stats.save();
+                }
+              }
+
+              await interaction.followUp(
+                `Congratulations! ${result} You've cleared Floor ${floor}!`
+              );
+            } else if (result.includes("Enemies win")) {
+              await interaction.followUp(`${result} Better luck next time!`);
+            } else {
+              await interaction.followUp(
+                `Battle ended with an unexpected result: ${result}`
+              );
+            }
+          } else {
+            await interaction.followUp(
+              "The battle ended without a clear result. Please check the game logs."
             );
-
+          }
+        } else {
           await readyMessage.edit({
-            embeds: [failedEmbed],
-            components: [],
-          });
-
-          await interaction.followUp({
             content:
-              "The dungeon raid has been cancelled due to not all players being ready.",
-            ephemeral: true,
+              "Not all players were ready in time. The dungeon raid has been cancelled.",
+            components: [],
           });
         }
       });
     } catch (error) {
-      console.error(error);
-      await interaction.reply({
-        content: "An error occurred while processing your request.",
+      console.error("Error in dungeon command:", error);
+      await interaction.followUp({
+        content: "An error occurred while processing the dungeon raid.",
         ephemeral: true,
       });
     }

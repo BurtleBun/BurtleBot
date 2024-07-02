@@ -31,13 +31,9 @@ const playerStatsSchema = new Schema({
     type: Number,
     default: 15,
   },
-  wins: {
+  highestClearedFloor: {
     type: Number,
-    default: 0,
-  },
-  losses: {
-    type: Number,
-    default: 0,
+    default: -1,
   },
 });
 

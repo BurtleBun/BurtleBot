@@ -7,27 +7,39 @@ module.exports = {
   callback: async (client, interaction) => {
     const userId = interaction.user.id;
     const guildId = interaction.guild.id;
+    const username = interaction.user.username;
 
     try {
-      let newUser;
       const userStats = await PlayerStats.findOne({ userId, guildId });
       if (!userStats) {
         const newUser = new PlayerStats({
-          userId: interaction.user.id,
-          guildId: interaction.guild.id,
+          userId,
+          guildId,
+          username,
+          attack: {
+            min: 1,
+            max: 5
+          },
+          speed: 5,
+          health: 15,
+          highestClearedFloor: -1
         });
         await newUser.save();
 
-        await interaction.reply(`Registered user <@${interaction.user.id}>`);
+        await interaction.reply(`Registered user <@${userId}>`);
         console.log(`Registered user ${interaction.user.tag}`);
       } else {
-        interaction.reply({
+        await interaction.reply({
           content: `You are already registered.`,
           ephemeral: true,
         });
       }
     } catch (error) {
-      console.log(error);
+      console.error("Error in register command:", error);
+      await interaction.reply({
+        content: "An error occurred while registering. Please try again later.",
+        ephemeral: true,
+      });
     }
   },
 };
