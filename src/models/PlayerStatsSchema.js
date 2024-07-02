@@ -16,16 +16,16 @@ const playerStatsSchema = new Schema({
   attack: {
     min: {
       type: Number,
-      default: 1
+      default: 1,
     },
     max: {
       type: Number,
-      default:5
+      default: 5,
     },
   },
   speed: {
     type: Number,
-    default: 5,
+    default: 10,
   },
   health: {
     type: Number,
@@ -34,6 +34,10 @@ const playerStatsSchema = new Schema({
   highestClearedFloor: {
     type: Number,
     default: -1,
+  },
+  stamina: {
+    type: Number,
+    default: 100,
   },
 });
 

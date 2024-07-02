@@ -25,12 +25,11 @@ module.exports = {
         .setThumbnail(`${userAvatar}`)
         .setDescription(`**<@${interaction.user.id}>'s stats**`)
         .addFields(
-          { name: "Level", value: `${userStats.level}`, inline: true },
-          { name: "XP", value: `${userStats.xp}`, inline: true },
-          { name: "Mythos", value: `${userStats.mythos}`, inline: true },
-          { name: "Balance", value: `${userStats.currency}`, inline: true },
-          { name: "Wins", value: `${userStats.wins}`, inline: true },
-          { name: "Losses", value: `${userStats.losses}`, inline: true },
+          { name: "Attack", value: `${userStats.attack.min}-${userStats.attack.max}`, inline: true },
+          { name: "Speed", value: `${userStats.speed}`, inline: true },
+          { name: "Health", value: `${userStats.health}`, inline: true },
+          { name: "Floor", value: `${userStats.highestClearedFloor}`, inline: true },
+          { name: "Stamina", value: `${userStats.stamina}`, inline: true },
         )
         .setTimestamp()
 

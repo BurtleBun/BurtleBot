@@ -45,6 +45,20 @@ class Character {
   }
 }
 
+async function checkAllMembersRegistered(partyMembers, guildId) {
+  const registeredPlayers = await PlayerStats.find({
+    userId: { $in: partyMembers },
+    guildId: guildId,
+  });
+
+  const unregisteredMembers = partyMembers.filter(
+    (memberId) =>
+      !registeredPlayers.some((player) => player.userId === memberId)
+  );
+
+  return unregisteredMembers;
+}
+
 function createHealthBar(current, max, length = 10) {
   const filledLength = Math.round((length * current) / max);
   const emptyLength = length - filledLength;
@@ -103,7 +117,7 @@ class Battle {
 
     if (actionTaker) {
       await this.processTurn(actionTaker);
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 1500)); //Delay between actions
       return this.processNextTurn();
     }
     return "Battle ended Unexpectedly";
@@ -221,7 +235,7 @@ class Battle {
 
   async updateBattleEmbed(result = null) {
     const battleTable = this.createBattleTable();
-    const recentLogs = this.log.slice(-10).join("\n");
+    const recentLogs = this.log.slice(-5).join("\n");
 
     let content = "```\n" + battleTable + "\n```\n";
     if (recentLogs) {
@@ -271,7 +285,23 @@ module.exports = {
         );
       }
 
-      // Check if all party members have cleared the previous floor
+      // Check if all party members are registered
+      const unregisteredMembers = await checkAllMembersRegistered(
+        party.members,
+        interaction.guildId
+      );
+
+      if (unregisteredMembers.length > 0) {
+        const unregisteredMentions = unregisteredMembers
+          .map((memberId) => `<@${memberId}>`)
+          .join(", ");
+
+        return await interaction.reply(
+          `The following party members are not registered: ${unregisteredMentions}. They need to use the /register command before attempting a dungeon.`
+        );
+      }
+
+      // Check if all party members have cleared the previous floor.
       const partyStats = await PlayerStats.find({
         userId: { $in: party.members },
         guildId: interaction.guildId,
@@ -329,6 +359,9 @@ module.exports = {
 
       collector.on("collect", async (i) => {
         if (i.customId === "dungeon_ready") {
+          // Defer the update immediately
+          await i.deferUpdate();
+
           if (!readyPlayers.has(i.user.id)) {
             readyPlayers.add(i.user.id);
 
@@ -344,7 +377,8 @@ module.exports = {
               collector.stop("all_ready");
             }
           } else {
-            await i.reply({
+            // Instead of replying, we'll send an ephemeral follow-up message
+            await i.followUp({
               content: "You are already ready!",
               ephemeral: true,
             });
@@ -381,18 +415,89 @@ module.exports = {
           let enemies;
           if (floor === 0) {
             enemies = [
-              new Character("enemy1", "Slime 1", 5, 1, 1, Math.random()*10+1),
-              new Character("enemy2", "Slime 2", 5, 1, 1, Math.random()*10+1),
-              new Character("enemy3", "Slime 3", 5, 1, 1, Math.random()*10+1),
+              new Character(
+                "enemy1",
+                "Slime 1",
+                5,
+                1,
+                1,
+                Math.random() * 5 + 1
+              ),
+              new Character(
+                "enemy2",
+                "Slime 2",
+                5,
+                1,
+                1,
+                Math.random() * 5 + 1
+              ),
+              new Character(
+                "enemy3",
+                "Slime 3",
+                5,
+                1,
+                1,
+                Math.random() * 5 + 1
+              ),
             ];
           } else if (floor === 1) {
             enemies = [
-              new Character("enemy1", "Slime 1", 5, 1, 1, 3),
-              new Character("enemy2", "Slime 2", 5, 1, 1, 3),
-              new Character("enemy3", "Slime 3", 5, 1, 1, 3),
-              new Character("enemy4", "Slime 4", 5, 1, 1, 3),
-              new Character("enemy5", "Slime 5", 5, 1, 1, 3),
-              new Character("enemy6", "Slime 6", 5, 1, 1, 3),
+              new Character("enemy1", "Mario", 50, 5, 5, 11),
+              new Character("enemy2", "Luigi", 50, 5, 5, 12),
+            ];
+          } else if (floor === 7) {
+            enemies = [
+              new Character("enemy1", "Mario", 50, 3, 3, 8),
+              new Character("enemy2", "Luigi", 50, 1, 1),
+            ];
+          } else if (floor === 6) {
+            enemies = [
+              new Character("enemy1", "Mario", 50, 3, 3, 8),
+              new Character("enemy2", "Luigi", 50, 1, 1),
+            ];
+          } else if (floor === 5) {
+            enemies = [
+              new Character("enemy1", "Jett", 10, 3, 3, 8),
+              new Character(
+                "enemy2",
+                "Knife 1",
+                1,
+                1,
+                1,
+                Math.random() * 15 + 10
+              ),
+              new Character(
+                "enemy3",
+                "Knife 2",
+                1,
+                1,
+                1,
+                Math.random() * 15 + 10
+              ),
+              new Character(
+                "enemy4",
+                "Knife 3",
+                1,
+                1,
+                1,
+                Math.random() * 15 + 10
+              ),
+              new Character(
+                "enemy5",
+                "Knife 4",
+                1,
+                1,
+                1,
+                Math.random() * 15 + 10
+              ),
+              new Character(
+                "enemy6",
+                "Knife 5",
+                1,
+                1,
+                1,
+                Math.random() * 15 + 10
+              ),
             ];
           } else {
             return await interaction.followUp("Invalid floor selected.");
